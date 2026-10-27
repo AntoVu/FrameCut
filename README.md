@@ -68,6 +68,14 @@ npm install
 npm start
 ```
 
+To build the Windows app (needs the `ffmpeg/` folder, which gets bundled):
+
+```
+npm run package
+```
+
+The app lands in `out\FrameCut-win32-x64`. Zip that folder for a release.
+
 ## License
 
 MIT. Release builds bundle FFmpeg, which is GPL-licensed (see `resources/ffmpeg/FFMPEG-LICENSE.txt` in the build).

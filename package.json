@@ -7,7 +7,8 @@
   "author": "FrameCut",
   "license": "MIT",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "package": "electron-packager . FrameCut --platform=win32 --arch=x64 --asar --icon=build/icon.ico --extra-resource=ffmpeg --out=out --overwrite \"--ignore=^/(ffmpeg|build|out|node_modules)($|/)\""
   },
   "devDependencies": {
     "electron": "^38.0.0",
