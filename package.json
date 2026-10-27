@@ -1,0 +1,16 @@
+{
+  "name": "framecut",
+  "productName": "FrameCut",
+  "version": "1.0.0",
+  "description": "Fast video trimming with crop, zoom and resize",
+  "main": "src/main.js",
+  "author": "FrameCut",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "@electron/packager": "^18.3.0"
+  }
+}
