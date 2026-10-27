@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; media-src 'self' file: blob:; img-src 'self' file: data: blob:; style-src 'self' file: 'unsafe-inline'; script-src 'self' file:" />
+  <title>FrameCut</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand"><span class="logo"></span>FrameCut</div>
+      <button id="openBtn" class="btn">Open video <kbd>Ctrl O</kbd></button>
+      <div id="fileName" class="file"></div>
+      <div class="spacer"></div>
+      <div id="encChip" class="chip">Checking GPU…</div>
+    </header>
+
+    <main class="main">
+      <section class="stage" id="stage">
+        <div class="empty" id="empty">
+          <div class="emptyIcon"></div>
+          <div class="emptyTitle">Drop a video here</div>
+          <div class="emptySub">or press <kbd>Ctrl O</kbd> to open one</div>
+        </div>
+        <div class="viewport" id="viewport" hidden>
+          <video id="video" preload="auto"></video>
+          <div class="cropLayer" id="cropLayer">
+            <div class="cropBox" id="cropBox">
+              <div class="grid"></div>
+              <div class="h" data-h="nw"></div><div class="h" data-h="n"></div><div class="h" data-h="ne"></div>
+              <div class="h" data-h="e"></div><div class="h" data-h="se"></div><div class="h" data-h="s"></div>
+              <div class="h" data-h="sw"></div><div class="h" data-h="w"></div>
+              <div class="cropLabel" id="cropLabel"></div>
+            </div>
+          </div>
+        </div>
+        <canvas id="previewCanvas" hidden></canvas>
+        <div class="loading" id="loading" hidden><div class="spinner"></div><span id="loadingText">Loading…</span></div>
+        <div class="viewToggle" id="viewToggle" hidden>
+          <button data-view="edit" class="on">Edit frame</button>
+          <button data-view="preview">Preview result <kbd>P</kbd></button>
+        </div>
+      </section>
+
+      <aside class="panel" id="panel">
+        <div class="group">
+          <div class="groupHead">Crop &amp; zoom <button class="link" id="resetCrop">Reset</button></div>
+          <div class="chips" id="aspectBtns">
+            <button data-a="free" class="on">Free</button>
+            <button data-a="orig">Original</button>
+            <button data-a="16:9">16:9</button>
+            <button data-a="9:16">9:16</button>
+            <button data-a="1:1">1:1</button>
+            <button data-a="4:5">4:5</button>
+            <button data-a="4:3">4:3</button>
+            <button data-a="21:9">21:9</button>
+          </div>
+          <label class="row slider">
+            <span>Zoom</span>
+            <input type="range" id="zoom" min="1" max="8" step="0.01" value="1" />
+            <output id="zoomOut">1.00×</output>
+          </label>
+          <div class="nums">
+            <label>X<input type="number" id="cx" min="0" /></label>
+            <label>Y<input type="number" id="cy" min="0" /></label>
+            <label>W<input type="number" id="cw" min="2" /></label>
+            <label>H<input type="number" id="ch" min="2" /></label>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="groupHead">Rotate &amp; flip</div>
+          <div class="chips">
+            <button id="rotL" title="Rotate left">⟲ Left</button>
+            <button id="rotR" title="Rotate right">⟳ Right</button>
+            <button id="flipH" class="toggle">⇋ Flip H</button>
+            <button id="flipV" class="toggle">⇵ Flip V</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="groupHead">Output size</div>
+          <select id="sizeMode">
+            <option value="crop">Same as crop</option>
+            <option value="source">Original frame size (zoom in)</option>
+            <option value="h2160">2160p (4K)</option>
+            <option value="h1440">1440p</option>
+            <option value="h1080">1080p</option>
+            <option value="h720">720p</option>
+            <option value="h480">480p</option>
+            <option value="custom">Custom…</option>
+          </select>
+          <div class="nums two" id="customSize" hidden>
+            <label>W<input type="number" id="ow" min="16" step="2" /></label>
+            <label>H<input type="number" id="oh" min="16" step="2" /></label>
+          </div>
+          <div id="fitWrap">
+            <div class="sub">When the shape doesn't match</div>
+            <div class="seg" id="fitBtns">
+              <button data-f="stretch" class="on">Stretch</button>
+              <button data-f="fit">Fit (bars)</button>
+              <button data-f="fill">Fill (trim)</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="groupHead">Trim</div>
+          <div class="seg" id="trimBtns">
+            <button data-t="precise" class="on">Frame-exact</button>
+            <button data-t="keyframe">Keyframe only</button>
+          </div>
+        </div>
+
+        <div class="summary" id="summary">
+          <div class="sumSize" id="sumSize">—</div>
+          <div class="sumMode" id="sumMode"></div>
+        </div>
+      </aside>
+    </main>
+
+    <section class="timelineArea" id="timelineArea">
+      <div class="transport">
+        <button class="icon sm" id="prevFrame" title="Previous frame (← or ,)">‹</button>
+        <button class="icon" id="playBtn" title="Play / pause (Space)">▶</button>
+        <button class="icon sm" id="nextFrame" title="Next frame (→ or .)">›</button>
+        <div class="time"><span id="tCur">0:00.00</span><span class="dim"> / <span id="tDur">0:00.00</span></span><span class="frameNo" id="tFrame"></span></div>
+        <div class="tbtns">
+          <button class="btn sm" id="setIn" title="First frame to keep (I)">⇤ Start <kbd>I</kbd></button>
+          <button class="btn sm" id="setOut" title="Last frame to keep (O)">End ⇥ <kbd>O</kbd></button>
+          <button class="btn sm" id="addSeg" title="Add segment (+)">＋ Segment</button>
+          <button class="btn sm" id="delSeg" title="Remove segment (Del)">Remove</button>
+        </div>
+        <div class="spacer"></div>
+        <div class="segInfo" id="segInfo"></div>
+      </div>
+      <div class="timeline" id="timeline">
+        <div class="ticks" id="ticks"></div>
+        <div class="track" id="track"></div>
+        <div class="playhead" id="playhead"><div class="phKnob"></div></div>
+      </div>
+    </section>
+
+    <footer class="exportBar">
+      <label class="field">Format
+        <select id="fmt">
+          <option value="mp4">MP4</option>
+          <option value="same">Same as source</option>
+          <option value="mkv">MKV</option>
+          <option value="mov">MOV</option>
+        </select>
+      </label>
+      <label class="field">Codec
+        <select id="codec">
+          <option value="h264">H.264</option>
+          <option value="hevc">HEVC (H.265)</option>
+        </select>
+      </label>
+      <label class="field">Quality
+        <select id="quality">
+          <option value="high">High</option>
+          <option value="balanced" selected>Balanced</option>
+          <option value="small">Small file</option>
+        </select>
+      </label>
+      <label class="field">Encoder
+        <select id="encoder"></select>
+      </label>
+      <label class="check"><input type="checkbox" id="merge" checked /> Merge segments</label>
+      <button class="btn ghost" id="outDirBtn" title="Output folder">Save next to source</button>
+      <div class="spacer"></div>
+      <div class="progress" id="progress" hidden>
+        <div class="bar"><div id="progBar"></div></div>
+        <span id="progText"></span>
+        <button class="link" id="cancelBtn">Cancel</button>
+      </div>
+      <button class="btn primary" id="exportBtn" disabled>Export <kbd>Ctrl E</kbd></button>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="../ffmpeg.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
