@@ -93,7 +93,8 @@
     if (key === 'free') return null;
     if (key === 'orig') return frameAspect();
     const [a, b] = key.split(':').map(Number);
-    return a / b;
+    // The crop lives in source space, so a 90° turn swaps the shape needed.
+    return S.edit.rotate % 180 ? b / a : a / b;
   }
   function plan() {
     const p = FF.buildVideoFilters(S.info, S.edit);
@@ -122,7 +123,8 @@
     };
     if (S.view === 'edit') {
       const v = fit(frameAspect());
-      Object.assign(viewport.style, { left: `${v.x}px`, top: `${v.y}px`, width: `${v.w}px`, height: `${v.h}px` });
+      Object.assign(viewport.style, { left: '0px', top: '0px', width: `${v.w}px`, height: `${v.h}px` });
+      if (!S.dragging) fitView(v.w, v.h, fit, r.width / 2, pad + ah / 2);
       drawCrop();
     } else {
       const p = plan();
@@ -136,6 +138,30 @@
   }
   new ResizeObserver(layout).observe(stage);
 
+  // Edit view is a viewfinder: rotate/flip the frame like the export and scale it so the crop fills the stage.
+  let view = new DOMMatrix();
+  function fitView(bw, bh, fit, cx, cy) {
+    const c = S.edit.crop, r90 = S.edit.rotate % 180 !== 0;
+    const boxW = c.w * bw, boxH = c.h * bh;
+    const t = fit(r90 ? boxH / boxW : boxW / boxH);
+    // Once zoomed in, shrink the box a little so some surrounding picture stays visible.
+    const k = 1 - 0.15 * clamp((Math.min(1 / c.w, 1 / c.h) - 1) * 2, 0, 1);
+    const s = (k * t.w) / (r90 ? boxH : boxW);
+    view = new DOMMatrix().translate(cx, cy)
+      .scale(S.edit.flipH ? -1 : 1, S.edit.flipV ? -1 : 1)
+      .rotate(S.edit.rotate)
+      .scale(s)
+      .translate(-(c.x + c.w / 2) * bw, -(c.y + c.h / 2) * bh);
+    viewport.style.transform = view.toString();
+    viewport.style.setProperty('--inv', 1 / s); // keeps handles and outline a constant screen size
+  }
+  // Pointer position -> normalized source-frame coords (undoes the view transform).
+  function toNorm(e) {
+    const r = stage.getBoundingClientRect();
+    const p = view.inverse().transformPoint(new DOMPoint(e.clientX - r.left, e.clientY - r.top));
+    return { x: p.x / viewport.offsetWidth, y: p.y / viewport.offsetHeight };
+  }
+
   // ---------------- crop overlay ----------------
   function drawCrop() {
     const c = S.edit.crop;
@@ -144,7 +170,8 @@
     });
     const p = plan();
     $('cropLabel').textContent = `${p.crop.w} × ${p.crop.h}`;
-    $('cropLabel').hidden = p.crop.full;
+    // ponytail: label hidden when rotated/flipped (it would turn with the frame); counter-rotate it if wanted.
+    $('cropLabel').hidden = p.crop.full || S.edit.rotate !== 0 || S.edit.flipH || S.edit.flipV;
   }
 
   function setCrop(c, fromZoom) {
@@ -153,7 +180,7 @@
     const w = clamp(c.w, minW, 1), h = clamp(c.h, minH, 1);
     S.edit.crop = { x: clamp(c.x, 0, 1 - w), y: clamp(c.y, 0, 1 - h), w, h };
     if (!fromZoom) syncZoom();
-    refresh();
+    refresh(!S.dragging); // refit the view, except mid-drag so the box doesn't slide under the pointer
   }
 
   function maxRectFor(rn) {
@@ -195,11 +222,10 @@
   });
 
   // Mouse wheel over the picture zooms the crop around the cursor.
-  viewport.addEventListener('wheel', (e) => {
+  stage.addEventListener('wheel', (e) => {
     if (!S.info || S.view !== 'edit') return;
     e.preventDefault();
-    const r = viewport.getBoundingClientRect();
-    const px = (e.clientX - r.left) / r.width, py = (e.clientY - r.top) / r.height;
+    const { x: px, y: py } = toNorm(e);
     const c = S.edit.crop;
     const f = Math.exp(e.deltaY * 0.0015);
     const m = maxRectFor(c.w / c.h);
@@ -215,17 +241,17 @@
     cropBox.setPointerCapture(e.pointerId);
     cropBox.classList.add('active');
     const handle = e.target.dataset.h || 'move';
-    const r = viewport.getBoundingClientRect();
+    S.dragging = true;
     const start = { ...S.edit.crop };
-    const p0 = { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+    const p0 = toNorm(e);
     const a = aspectValue(S.aspect);
     const rn = a ? normRatio(a) : null;
     const s = src();
     const minW = 16 / s.w, minH = 16 / s.h;
 
     const move = (ev) => {
-      const px = clamp((ev.clientX - r.left) / r.width, 0, 1);
-      const py = clamp((ev.clientY - r.top) / r.height, 0, 1);
+      const n = toNorm(ev);
+      const px = clamp(n.x, 0, 1), py = clamp(n.y, 0, 1);
       if (handle === 'move') {
         setCrop({ x: start.x + px - p0.x, y: start.y + py - p0.y, w: start.w, h: start.h });
         return;
@@ -263,6 +289,11 @@
       cropBox.removeEventListener('pointermove', move);
       cropBox.removeEventListener('pointerup', up);
       cropBox.classList.remove('active');
+      // Ease the view onto the new crop.
+      S.dragging = false;
+      viewport.classList.add('ease');
+      layout();
+      setTimeout(() => viewport.classList.remove('ease'), 250);
     };
     cropBox.addEventListener('pointermove', move);
     cropBox.addEventListener('pointerup', up);
@@ -293,11 +324,12 @@
     S.edit.size = { mode: 'crop' }; $('sizeMode').value = 'crop';
     applyAspect('free');
     syncZoom();
-    refresh();
+    refresh(true);
   });
 
-  $('rotL').addEventListener('click', () => { S.edit.rotate = (S.edit.rotate + 270) % 360; refresh(true); });
-  $('rotR').addEventListener('click', () => { S.edit.rotate = (S.edit.rotate + 90) % 360; refresh(true); });
+  // Re-apply a locked aspect after turning, since the source-space shape flips.
+  $('rotL').addEventListener('click', () => { S.edit.rotate = (S.edit.rotate + 270) % 360; applyAspect(S.aspect); refresh(true); });
+  $('rotR').addEventListener('click', () => { S.edit.rotate = (S.edit.rotate + 90) % 360; applyAspect(S.aspect); refresh(true); });
   $('flipH').addEventListener('click', () => { S.edit.flipH = !S.edit.flipH; refresh(true); });
   $('flipV').addEventListener('click', () => { S.edit.flipV = !S.edit.flipV; refresh(true); });
 
