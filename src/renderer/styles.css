@@ -91,6 +91,10 @@ kbd {
 .h[data-h="s"] { left: calc(50% - 10px); bottom: -5px; width: 20px; height: 10px; cursor: ns-resize; }
 .h[data-h="e"] { top: calc(50% - 10px); right: -5px; width: 10px; height: 20px; cursor: ew-resize; }
 .h[data-h="w"] { top: calc(50% - 10px); left: -5px; width: 10px; height: 20px; cursor: ew-resize; }
+.swapEdges .h[data-h="n"], .swapEdges .h[data-h="s"] { cursor: ew-resize; }
+.swapEdges .h[data-h="e"], .swapEdges .h[data-h="w"] { cursor: ns-resize; }
+.swapCorners .h[data-h="nw"], .swapCorners .h[data-h="se"] { cursor: nesw-resize; }
+.swapCorners .h[data-h="ne"], .swapCorners .h[data-h="sw"] { cursor: nwse-resize; }
 .cropLabel { position: absolute; left: calc(6px * var(--inv)); top: calc(6px * var(--inv)); transform: scale(var(--inv)); transform-origin: 0 0; font-size: 11px; background: rgba(0,0,0,0.65); padding: 2px 6px; border-radius: 4px; pointer-events: none; font-variant-numeric: tabular-nums; }
 
 .viewToggle { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; background: rgba(20,21,24,0.9); border: 1px solid var(--line2); border-radius: 999px; padding: 3px; backdrop-filter: blur(6px); }

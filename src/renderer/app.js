@@ -172,6 +172,10 @@
     $('cropLabel').textContent = `${p.crop.w} × ${p.crop.h}`;
     // ponytail: label hidden when rotated/flipped (it would turn with the frame); counter-rotate it if wanted.
     $('cropLabel').hidden = p.crop.full || S.edit.rotate !== 0 || S.edit.flipH || S.edit.flipV;
+    // Handles turn with the frame, so swap their resize cursors to match the on-screen direction.
+    const r90 = S.edit.rotate % 180 !== 0;
+    cropBox.classList.toggle('swapEdges', r90);
+    cropBox.classList.toggle('swapCorners', r90 !== (S.edit.flipH !== S.edit.flipV));
   }
 
   function setCrop(c, fromZoom) {
