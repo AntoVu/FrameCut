@@ -136,14 +136,33 @@ function needsReencode(info, edit) {
 
 const MP4_AUDIO_OK = new Set(['aac', 'mp3', 'ac3', 'eac3', 'opus', 'alac', 'flac']);
 
-function audioArgs(info, ext) {
-  if (!info.audioCodec) return [];
+function audioArgs(codec, ext) {
   const container = ext.replace('.', '').toLowerCase();
   if (container === 'mkv') return ['-c:a', 'copy'];
-  if ((container === 'mp4' || container === 'mov' || container === 'm4v') && MP4_AUDIO_OK.has(info.audioCodec)) {
+  if ((container === 'mp4' || container === 'mov' || container === 'm4v') && MP4_AUDIO_OK.has(codec)) {
     return ['-c:a', 'copy'];
   }
   return ['-c:a', 'aac', '-b:a', '192k'];
+}
+
+// Audio tracks to export (indexes into info.audioTracks). Default: track 2, or track 1 if there's only one.
+const defaultAudio = (info) => (info.audioTracks.length > 1 ? [1] : info.audioTracks.length ? [0] : []);
+const audioSel = (info, edit) => (edit.audio || defaultAudio(info)).filter((i) => i < info.audioTracks.length);
+
+// Filter source for audio tracks `ids` of `input`: a single track as-is, several mixed into one.
+const mixSrc = (input, ids) => (ids.length > 1
+  ? `${ids.map((k) => `[${input}:a:${k}]`).join('')}amix=inputs=${ids.length}:normalize=0`
+  : `[${input}:a:${ids[0]}]anull`);
+
+// Map + codec args for the chosen tracks. `renumbered`: the input holds only the chosen tracks, in order.
+function audioOut(info, edit, ext, input = 0, renumbered = false) {
+  const sel = audioSel(info, edit);
+  const ids = renumbered ? sel.map((_, k) => k) : sel;
+  if (!sel.length) return { filter: '', map: [], codec: ['-an'] };
+  if (sel.length === 1) {
+    return { filter: '', map: ['-map', `${input}:a:${ids[0]}`], codec: audioArgs(info.audioTracks[sel[0]].codec, ext) };
+  }
+  return { filter: `${mixSrc(input, ids)}[a]`, map: ['-map', '[a]'], codec: ['-c:a', 'aac', '-b:a', '192k'] };
 }
 
 // Args for one segment. job = { input, output, start, end, info, edit, encoder, quality }
@@ -152,20 +171,23 @@ function segmentArgs(job) {
   const ext = extname(output);
   const dur = Math.max(0.01, end - start);
   const reencode = job.force || needsReencode(info, edit);
+  const a = audioOut(info, edit, ext);
   const args = ['-hide_banner', '-y', '-nostats', '-progress', 'pipe:1'];
 
   if (!reencode) {
     args.push('-ss', start.toFixed(3), '-i', input, '-t', dur.toFixed(3));
-    args.push('-map', '0:v:0?', '-map', '0:a?', '-c', 'copy', '-avoid_negative_ts', 'make_zero');
+    if (a.filter) args.push('-filter_complex', a.filter);
+    args.push('-map', '0:v:0?', ...a.map, '-c', 'copy', ...a.codec, '-avoid_negative_ts', 'make_zero');
   } else {
     const hw = !/^lib/.test(job.encoder);
     if (hw) args.push('-hwaccel', 'auto');
     args.push('-ss', start.toFixed(3), '-i', input, '-t', dur.toFixed(3));
-    args.push('-map', '0:v:0', '-map', '0:a?');
+    if (a.filter) args.push('-filter_complex', a.filter);
+    args.push('-map', '0:v:0', ...a.map);
     const { filters } = buildVideoFilters(info, edit);
     if (filters.length) args.push('-vf', filters.join(','));
     args.push('-c:v', job.encoder, ...qualityArgs(job.encoder, job.quality));
-    args.push(...audioArgs(info, ext));
+    args.push(...a.codec);
   }
   if (/\.(mp4|mov|m4v)$/i.test(ext)) args.push('-movflags', '+faststart');
   args.push(output);
@@ -185,12 +207,13 @@ function mergeEncodeArgs(job) {
   }
   const { filters } = buildVideoFilters(info, edit);
   const chain = filters.length ? filters.join(',') : 'null';
-  const hasAudio = !!info.audioCodec;
+  const sel = audioSel(info, edit);
+  const hasAudio = sel.length > 0;
   const parts = [];
   let inputs = '';
   segments.forEach((_, i) => {
     parts.push(`[${i}:v:0]${chain},setpts=PTS-STARTPTS[v${i}]`);
-    if (hasAudio) parts.push(`[${i}:a:0]aresample=async=1,asetpts=PTS-STARTPTS[a${i}]`);
+    if (hasAudio) parts.push(`${mixSrc(i, sel)},aresample=async=1,asetpts=PTS-STARTPTS[a${i}]`);
     inputs += hasAudio ? `[v${i}][a${i}]` : `[v${i}]`;
   });
   parts.push(`${inputs}concat=n=${segments.length}:v=1:a=${hasAudio ? 1 : 0}${hasAudio ? '[v][a]' : '[v]'}`);
@@ -261,7 +284,8 @@ function smartEncodeArgs({ input, output, from, to, info, encoder }) {
 // seek a little early, then let the segment muxer split at the exact cut timestamps.
 // `landing` = timestamp of the first packet FFmpeg will output for this seek (see landingArgs).
 // Returns { args, pick } where pick is the index of the segment file holding [from, to).
-function copyRangeArgs({ input, output, seek, landing, from, to, margin, kind, format }) {
+// `audio`: audio track indexes to copy when kind is 'a'.
+function copyRangeArgs({ input, output, seek, landing, from, to, margin, kind, format, audio }) {
   const times = [];
   let pick = 0;
   if (landing < from - margin) { times.push(from - landing - margin); pick = 1; }
@@ -270,7 +294,7 @@ function copyRangeArgs({ input, output, seek, landing, from, to, margin, kind, f
   if (to != null) args.push('-t', (to - seek + 3).toFixed(3));
   args.push('-i', input);
   if (kind === 'v') args.push('-map', '0:v:0', '-c:v', 'copy', '-an', '-sn', '-dn');
-  else args.push('-map', '0:a', '-c:a', 'copy', '-vn', '-sn', '-dn');
+  else args.push(...audio.flatMap((i) => ['-map', `0:a:${i}`]), '-c:a', 'copy', '-vn', '-sn', '-dn');
   args.push('-f', 'segment', '-segment_format', format, '-reset_timestamps', '1');
   if (times.length) args.push('-segment_times', times.map((t) => t.toFixed(6)).join(','));
   args.push(output);
@@ -278,8 +302,8 @@ function copyRangeArgs({ input, output, seek, landing, from, to, margin, kind, f
 }
 
 // Prints the first packet FFmpeg outputs for a copy-mode seek (framecrc format).
-function landingArgs({ input, seek, kind }) {
-  return ['-v', 'error', '-copyts', '-ss', seek.toFixed(6), '-i', input, '-map', kind === 'v' ? '0:v:0' : '0:a:0',
+function landingArgs({ input, seek, kind, track = 0 }) {
+  return ['-v', 'error', '-copyts', '-ss', seek.toFixed(6), '-i', input, '-map', kind === 'v' ? '0:v:0' : `0:a:${track}`,
     '-c', 'copy', `-frames:${kind}`, '1', '-f', 'framecrc', '-'];
 }
 function parseLanding(text, startTime) {
@@ -359,7 +383,8 @@ const concatLine = (file, duration, outpoint) => {
 };
 
 // Final step: join video pieces (+ audio) into the output container. All stream copy.
-function smartMuxArgs({ videoList, audio, audioIsList, input, output, info }) {
+// The audio list holds only the chosen tracks (see copyRangeArgs).
+function smartMuxArgs({ videoList, audio, input, output, info, edit }) {
   const ext = extname(output);
   const args = ['-hide_banner', '-y', '-nostats', '-progress', 'pipe:1'];
   if (info.rotation) args.push('-display_rotation', String(info.rotation));
@@ -372,10 +397,12 @@ function smartMuxArgs({ videoList, audio, audioIsList, input, output, info }) {
   }
   args.push('-i', input);
   const meta = n;
+  const a = ai >= 0 ? audioOut(info, edit, ext, ai, true) : null;
+  if (a && a.filter) args.push('-filter_complex', a.filter);
   args.push('-map', '0:v:0');
-  if (ai >= 0) args.push('-map', `${ai}:a?`);
+  if (a) args.push(...a.map);
   args.push('-map_metadata', String(meta), '-c:v', 'copy');
-  if (ai >= 0) args.push(...audioArgs(info, ext));
+  if (a) args.push(...a.codec);
   // hev1 keeps the per-keyframe parameter sets the joined pieces need (hvc1 strips them).
   if (info.videoCodec === 'hevc' && /\.(mp4|mov|m4v)$/i.test(ext)) args.push('-tag:v', 'hev1');
   if (/\.(mp4|mov|m4v)$/i.test(ext)) args.push('-movflags', '+faststart');
@@ -393,7 +420,6 @@ function concatArgs(listFile, output) {
 function parseProbe(json) {
   const streams = json.streams || [];
   const v = streams.find((s) => s.codec_type === 'video' && !(s.disposition && s.disposition.attached_pic));
-  const a = streams.find((s) => s.codec_type === 'audio');
   if (!v) throw new Error('No video stream found in this file.');
   let rotation = 0;
   for (const sd of v.side_data_list || []) if (typeof sd.rotation === 'number') rotation = sd.rotation;
@@ -423,7 +449,12 @@ function parseProbe(json) {
     colorSpace: v.color_space && v.color_space !== 'unknown' ? v.color_space : '',
     colorRange: v.color_range && v.color_range !== 'unknown' ? v.color_range : '',
     startTime: Number((json.format && json.format.start_time) || 0) || 0,
-    audioCodec: a ? a.codec_name : null,
+    audioTracks: streams.filter((s) => s.codec_type === 'audio').map((s) => ({
+      codec: s.codec_name,
+      channels: s.channels || 0,
+      lang: (s.tags && s.tags.language) || '',
+      title: (s.tags && s.tags.title) || '',
+    })),
     container: (json.format && json.format.format_name) || '',
     size: Number((json.format && json.format.size) || 0),
     bitRate: Number((json.format && json.format.bit_rate) || 0),
@@ -437,6 +468,8 @@ const FF = {
   cropPixels,
   buildVideoFilters,
   needsReencode,
+  defaultAudio,
+  audioSel,
   segmentArgs,
   mergeEncodeArgs,
   canSmartCut,

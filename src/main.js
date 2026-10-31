@@ -211,7 +211,7 @@ ipcMain.handle('export', async (e, job) => {
   try {
     if (smart) {
       const res = await smartCut({
-        input: job.input, info: job.info, segments: segs, merge: job.merge, ext, outDir, base,
+        input: job.input, info: job.info, edit: job.edit, segments: segs, merge: job.merge, ext, outDir, base,
         encoders: job.smartEncoders || [], ffmpeg: FFMPEG(), ffprobe: FFPROBE(), run, runFfmpeg,
         onProgress: (p) => send({ phase: 'segment', index: 0, count: 1, progress: p }), uniquePath,
       });

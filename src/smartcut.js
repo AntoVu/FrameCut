@@ -34,30 +34,31 @@ async function pool(tasks, limit) {
 }
 
 /**
- * opts = { input, info, segments, merge, ext, outDir, base, encoders (ids, best first),
+ * opts = { input, info, edit, segments, merge, ext, outDir, base, encoders (ids, best first),
  *          ffmpeg, ffprobe, run, runFfmpeg(args, onTime), onProgress(fraction), uniquePath }
  * Returns { outputs, encodedSeconds, copiedSeconds }.
  */
 async function smartCut(opts) {
   const { input, info, segments, ffmpeg, ffprobe, run, runFfmpeg, onProgress } = opts;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'framecut-sc-'));
-  const hasAudio = !!info.audioCodec;
+  const audio = F.audioSel(info, opts.edit);
+  const hasAudio = audio.length > 0;
   const fd = 1 / (info.fps || 30);
   const encoders = opts.encoders.length ? opts.encoders : [info.videoCodec === 'hevc' ? 'libx265' : 'libx264'];
   let encoderIdx = 0;
   let encodedSeconds = 0;
   let copiedSeconds = 0;
 
-  // Copy [from, to) of the video (kind 'v') or all audio tracks (kind 'a') into `file`.
+  // Copy [from, to) of the video (kind 'v') or the chosen audio tracks (kind 'a') into `file`.
   const copyRange = async (kind, from, to, file, onTime) => {
     const seek = Math.max(0, from - 1);
-    const lr = await run(ffmpeg, F.landingArgs({ input, seek, kind }));
+    const lr = await run(ffmpeg, F.landingArgs({ input, seek, kind, track: audio[0] }));
     let landing = F.parseLanding(lr.stdout || '', info.startTime);
     if (landing == null) landing = seek;
     const ext = kind === 'v' ? 'ts' : 'mka';
     const pattern = path.join(tmp, `${path.basename(file, path.extname(file))}-%03d.${ext}`);
     const { args, pick } = F.copyRangeArgs({
-      input, output: pattern, seek, landing, from, to, kind,
+      input, output: pattern, seek, landing, from, to, kind, audio,
       margin: kind === 'v' ? fd / 2 : 0.01, format: kind === 'v' ? 'mpegts' : 'matroska',
     });
     await runFfmpeg(args, onTime && ((t) => onTime(t - (from - seek))));
@@ -145,7 +146,7 @@ async function smartCut(opts) {
         }).join('\n'));
       }
       try {
-        await runFfmpeg(F.smartMuxArgs({ videoList: vlist, audio: alist, input, output: out, info }));
+        await runFfmpeg(F.smartMuxArgs({ videoList: vlist, audio: alist, input, output: out, info, edit: opts.edit }));
       } catch (e) {
         try { fs.unlinkSync(out); } catch {}
         for (const o of outputs) try { fs.unlinkSync(o); } catch {}

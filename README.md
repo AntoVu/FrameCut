@@ -29,6 +29,12 @@ Click **More info** → **Run anyway**. You only need to do this once.
 - Custom size + "Stretch" squashes/stretches; "Fit" adds black bars; "Fill" trims the edges.
 - "Preview result" (or `P`) shows exactly what the export will look like.
 
+## Audio tracks
+
+Files with several audio tracks (e.g. game + mic recordings) list them under "Audio tracks". By default only
+track 2 is exported (track 1 if the file has just one). Check several and they're mixed into a single track
+(re-encoded to AAC); uncheck all to export without audio. The in-app player always plays the first track.
+
 ## Frame-exact trimming
 
 Step to the first frame you want and press `I`, then step to the last frame you want and press `O`.

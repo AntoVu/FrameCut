@@ -432,9 +432,34 @@
       $('sumMode').innerHTML = `<b class="enc">Re-encode ${where}</b> — frame-accurate cuts. Audio is copied when possible.`;
     }
     document.querySelectorAll('#trimBtns button').forEach((b) => b.classList.toggle('on', b.dataset.t === S.trimMode));
+    const na = S.edit.audio.length;
+    $('audioNote').textContent = na > 1 ? 'Checked tracks are mixed into one.' : na ? '' : 'No audio will be exported.';
     if (S.view === 'edit') drawCrop();
     if (relayout || S.view === 'preview') layout();
     updateExportState();
+  }
+
+  // ---------------- audio tracks ----------------
+  function renderAudio() {
+    const tracks = S.info.audioTracks;
+    const list = $('audioList');
+    $('audioGroup').hidden = !tracks.length;
+    list.innerHTML = '';
+    tracks.forEach((t, i) => {
+      const l = document.createElement('label');
+      l.className = 'check';
+      const c = document.createElement('input');
+      c.type = 'checkbox';
+      c.checked = S.edit.audio.includes(i);
+      c.addEventListener('change', () => {
+        S.edit.audio = [...list.querySelectorAll('input')].map((x, k) => (x.checked ? k : -1)).filter((k) => k >= 0);
+        refresh();
+      });
+      const ch = { 1: 'mono', 2: 'stereo', 6: '5.1', 8: '7.1' }[t.channels] || (t.channels ? `${t.channels} ch` : '');
+      const lang = t.lang === 'und' ? '' : t.lang;
+      l.append(c, [`Track ${i + 1}`, (t.codec || '').toUpperCase(), ch, lang, t.title].filter(Boolean).join(' · '));
+      list.appendChild(l);
+    });
   }
 
   // ---------------- encoders ----------------
@@ -488,6 +513,8 @@
     S.file = file;
     S.info = info;
     S.edit = freshEdit();
+    S.edit.audio = FF.defaultAudio(info);
+    renderAudio();
     S.aspect = 'free';
     $('sizeMode').value = 'crop';
     document.querySelectorAll('#aspectBtns button').forEach((b) => b.classList.toggle('on', b.dataset.a === 'free'));

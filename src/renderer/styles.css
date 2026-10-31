@@ -172,6 +172,7 @@ select:focus { border-color: var(--accent); }
 .field { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 12px; }
 .check { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 12px; cursor: pointer; }
 .check input { accent-color: var(--accent); }
+#audioList { display: flex; flex-direction: column; gap: 6px; }
 .progress { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
 .progress .bar { width: 180px; height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden; }
 #progBar { height: 100%; width: 0; background: var(--accent); transition: width .15s; }
