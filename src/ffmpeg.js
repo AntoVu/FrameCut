@@ -145,8 +145,8 @@ function audioArgs(codec, ext) {
   return ['-c:a', 'aac', '-b:a', '192k'];
 }
 
-// Audio tracks to export (indexes into info.audioTracks). Default: track 2, or track 1 if there's only one.
-const defaultAudio = (info) => (info.audioTracks.length > 1 ? [1] : info.audioTracks.length ? [0] : []);
+// Audio tracks to export (indexes into info.audioTracks). Default: track 1.
+const defaultAudio = (info) => (info.audioTracks.length ? [0] : []);
 const audioSel = (info, edit) => (edit.audio || defaultAudio(info)).filter((i) => i < info.audioTracks.length);
 
 // Filter source for audio tracks `ids` of `input`: a single track as-is, several mixed into one.

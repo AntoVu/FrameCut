@@ -32,7 +32,7 @@ Click **More info** → **Run anyway**. You only need to do this once.
 ## Audio tracks
 
 Files with several audio tracks (e.g. game + mic recordings) list them under "Audio tracks". By default only
-track 2 is exported (track 1 if the file has just one). Check several and they're mixed into a single track
+track 1 is exported. Check several and they're mixed into a single track
 (re-encoded to AAC); uncheck all to export without audio. The in-app player always plays the first track.
 
 ## Frame-exact trimming
