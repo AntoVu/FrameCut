@@ -497,6 +497,7 @@
   $('codec').addEventListener('change', () => { fillEncoders(); savePrefs(); });
   $('encoder').addEventListener('change', () => refresh());
   for (const id of ['fmt', 'quality', 'merge']) $(id).addEventListener('change', savePrefs);
+  for (const id of ['fmt', 'quality']) $(id).addEventListener('change', updateExportState);
 
   // ---------------- loading a file ----------------
   async function openFile(file) {
@@ -773,6 +774,18 @@
   function updateExportState() {
     $('exportBtn').disabled = !S.info || S.exporting;
     $('merge').closest('label').style.display = S.segs.length > 1 ? '' : 'none';
+    if (!S.info) return;
+    // Same mode choice as the export in main.js.
+    const reencode = plan().reencode || (S.trimMode === 'precise' && !FF.canSmartCut(S.info));
+    const fmt = $('fmt').value;
+    const bytes = FF.estimateBytes(S.info, S.edit, {
+      seconds: S.segs.filter((s) => s.end - s.start > 0.05).reduce((a, s) => a + (s.end - s.start), 0),
+      reencode, codec: $('codec').value, quality: $('quality').value,
+      ext: fmt === 'same' ? (/\.[^.]+$/.exec(S.info.name) || ['.mp4'])[0] : `.${fmt}`,
+    });
+    $('sumBytes').textContent = reencode
+      ? `Estimated size ~${fmtBytes(bytes)} (rough guess, re-encode depends on the content)`
+      : `Estimated size ≈ ${fmtBytes(bytes)}`;
   }
 
   $('outDirBtn').addEventListener('click', async () => {
@@ -823,7 +836,7 @@
           ? ` · frame-exact (re-encoded ${res.encodedSeconds.toFixed(1)}s at the cuts, copied ${res.copiedSeconds.toFixed(1)}s losslessly)`
           : ' · frame-exact and fully lossless (cuts landed on keyframes)';
       }
-      toast(`Saved ${names}\nDone in ${secs}s${how}`, {
+      toast(`Saved ${names} (${fmtBytes(res.bytes)})\nDone in ${secs}s${how}`, {
         actions: [{ label: 'Show in folder', run: () => window.api.showInFolder(res.outputs[0]) }],
       });
     } else if (res.cancelled) {

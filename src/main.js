@@ -187,8 +187,14 @@ function runFfmpeg(args, onTime) {
   });
 }
 
-// job = { input, info, edit, segments:[{start,end}], merge, encoder, quality, ext, outDir }
 ipcMain.handle('export', async (e, job) => {
+  const res = await exportJob(e, job);
+  if (res.ok) res.bytes = res.outputs.reduce((a, o) => a + fs.statSync(o).size, 0);
+  return res;
+});
+
+// job = { input, info, edit, segments:[{start,end}], merge, encoder, quality, ext, outDir }
+async function exportJob(e, job) {
   const send = (msg) => e.sender.send('export-progress', msg);
   current = { cancelled: false, procs: new Set() };
   const frameEdits = F.needsReencode(job.info, job.edit);
@@ -269,4 +275,4 @@ ipcMain.handle('export', async (e, job) => {
     for (const t of temps) try { fs.unlinkSync(t); } catch {}
     current = null;
   }
-});
+}

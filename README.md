@@ -64,6 +64,9 @@ Files are saved next to the original (e.g. `clip-edit.mp4`), or in a folder you 
 "Save next to source" button (right-click it to go back to saving next to the source).
 With several segments, "Merge segments" joins them into one file; untick it for separate files.
 
+The panel shows the estimated output size. It's close for lossless/smart cuts and a rough guess for
+re-encodes; the real size is shown when the export finishes.
+
 ## Run from source
 
 Requires Node.js and FFmpeg (`ffmpeg.exe` and `ffprobe.exe`) either on your PATH or in an `ffmpeg/`

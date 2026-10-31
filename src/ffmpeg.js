@@ -165,6 +165,26 @@ function audioOut(info, edit, ext, input = 0, renumbered = false) {
   return { filter: `${mixSrc(input, ids)}[a]`, map: ['-map', '[a]'], codec: ['-c:a', 'aac', '-b:a', '192k'] };
 }
 
+// Rough output size in bytes for `seconds` of output. Copy modes scale the source bitrates (close);
+// re-encodes reuse the source's bits per pixel (a stand-in for how complex the content is) at the output size.
+// ponytail: rough guess for re-encodes (the real size is shown after export); a short test encode would be closer.
+const QUALITY_SHARE = { high: 1, balanced: 0.6, small: 0.35 };
+function estimateBytes(info, edit, { seconds, reencode, codec, quality, ext }) {
+  let v = info.videoBitRate || Math.max(0, info.bitRate - info.audioTracks.reduce((s, t) => s + t.bitRate, 0));
+  if (reencode) {
+    const p = buildVideoFilters(info, edit);
+    const bpp = v / (info.width * info.height * (info.fps || 30));
+    v = bpp * p.outW * p.outH * (info.fps || 30) * (QUALITY_SHARE[quality] || 0.6) * (codec === 'hevc' ? 0.7 : 1);
+  }
+  const sel = audioSel(info, edit);
+  let a = sel.length > 1 ? 192e3 : 0;
+  if (sel.length === 1) {
+    const t = info.audioTracks[sel[0]];
+    a = audioArgs(t.codec, ext)[1] === 'copy' && t.bitRate ? t.bitRate : 192e3;
+  }
+  return ((v + a) * seconds / 8) * 1.01; // ~1% container overhead
+}
+
 // Args for one segment. job = { input, output, start, end, info, edit, encoder, quality }
 function segmentArgs(job) {
   const { input, output, start, end, info, edit } = job;
@@ -434,6 +454,8 @@ function parseProbe(json) {
     const [n, d] = v.sample_aspect_ratio.split(':').map(Number);
     if (n && d) sar = n / d;
   }
+  // MKV keeps per-stream bitrates in a BPS tag.
+  const streamRate = (s) => Number(s.bit_rate || (s.tags && (s.tags.BPS || s.tags['BPS-eng']))) || 0;
   const duration = Number((json.format && json.format.duration) || v.duration || 0);
   return {
     width: v.width,
@@ -454,10 +476,12 @@ function parseProbe(json) {
       channels: s.channels || 0,
       lang: (s.tags && s.tags.language) || '',
       title: (s.tags && s.tags.title) || '',
+      bitRate: streamRate(s),
     })),
     container: (json.format && json.format.format_name) || '',
     size: Number((json.format && json.format.size) || 0),
     bitRate: Number((json.format && json.format.bit_rate) || 0),
+    videoBitRate: streamRate(v),
   };
 }
 
@@ -470,6 +494,7 @@ const FF = {
   needsReencode,
   defaultAudio,
   audioSel,
+  estimateBytes,
   segmentArgs,
   mergeEncodeArgs,
   canSmartCut,
