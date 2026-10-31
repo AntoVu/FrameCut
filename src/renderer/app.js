@@ -734,8 +734,9 @@
       const t = clamp(xToT(ev.clientX - r.left), 0, dur());
       if (mode === 'edge') {
         const f = 1 / fps();
-        if (edge === 'start') { s.start = Math.min(snap(t), s.end - f); seekFrame(Math.round(s.start * fps())); }
-        else { s.end = Math.max(snap(t), s.start + f); seekFrame(Math.round(s.end * fps()) - 1); }
+        // The playhead stays put while trimming.
+        if (edge === 'start') s.start = Math.min(snap(t), s.end - f);
+        else s.end = Math.max(snap(t), s.start + f);
         renderTimeline();
       } else {
         seek(t);
