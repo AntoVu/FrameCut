@@ -193,15 +193,16 @@ ipcMain.handle('export', async (e, job) => {
   return res;
 });
 
-// job = { input, info, edit, segments:[{start,end}], merge, encoder, quality, ext, outDir }
+// job = { input, info, edit, segments:[{start,end}], merge, encoder, quality, ext, outDir, targetBytes? }
 async function exportJob(e, job) {
   const send = (msg) => e.sender.send('export-progress', msg);
   current = { cancelled: false, procs: new Set() };
   const frameEdits = F.needsReencode(job.info, job.edit);
   const precise = job.trimMode !== 'keyframe';
-  const smart = !frameEdits && precise && F.canSmartCut(job.info);
-  // Frame-exact trim of a codec we can't smart-cut (VP9, AV1, ProRes...) → full re-encode.
-  const force = !frameEdits && precise && !smart;
+  const target = job.targetBytes > 0;
+  const smart = !frameEdits && precise && !target && F.canSmartCut(job.info);
+  // Frame-exact trim of a codec we can't smart-cut (VP9, AV1, ProRes...), or a target size → full re-encode.
+  const force = !frameEdits && !smart && (precise || target);
   const reencode = frameEdits || force;
   const base = path.basename(job.input, path.extname(job.input));
   let ext = job.ext === 'same' ? path.extname(job.input) || '.mp4' : `.${job.ext}`;
@@ -209,6 +210,7 @@ async function exportJob(e, job) {
   const outDir = job.outDir || path.dirname(job.input);
   const segs = job.segments.filter((s) => s.end - s.start > 0.05);
   const total = segs.reduce((a, s) => a + (s.end - s.start), 0) || 1;
+  const { v: vbr, a: abr } = target ? F.targetRates(job.info, job.edit, job.targetBytes, total) : {};
   const outputs = [];
   const temps = [];
   let done = 0;
@@ -232,7 +234,7 @@ async function exportJob(e, job) {
       outputs.push(out);
       const args = F.mergeEncodeArgs({
         input: job.input, output: out, segments: segs, info: job.info, edit: job.edit,
-        encoder: job.encoder, quality: job.quality,
+        encoder: job.encoder, quality: job.quality, vbr, abr,
       });
       send({ phase: 'segment', index: 0, count: 1, progress: 0 });
       await runFfmpeg(args, (t) => send({ phase: 'segment', index: 0, count: 1, progress: Math.min(1, t / total) }));
@@ -251,7 +253,7 @@ async function exportJob(e, job) {
       }
       const args = F.segmentArgs({
         input: job.input, output: out, start: s.start, end: s.end, force,
-        info: job.info, edit: job.edit, encoder: job.encoder, quality: job.quality,
+        info: job.info, edit: job.edit, encoder: job.encoder, quality: job.quality, vbr, abr,
       });
       send({ phase: 'segment', index: i, count: segs.length, progress: done / total });
       await runFfmpeg(args, (t) => send({ phase: 'segment', index: i, count: segs.length, progress: Math.min(1, (done + t) / total) }));

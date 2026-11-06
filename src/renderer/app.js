@@ -418,7 +418,11 @@
     document.querySelectorAll('#fitBtns button').forEach((b) => b.classList.toggle('on', b.dataset.f === S.edit.fit));
 
     $('sumSize').textContent = `${p.outW} × ${p.outH}`;
-    if (!p.reencode && S.trimMode === 'keyframe') {
+    if (targetMB() > 0) {
+      const enc = currentEncoder();
+      const where = enc && !/^lib/.test(enc) ? `on GPU (${encLabel(enc)})` : 'on CPU';
+      $('sumMode').innerHTML = `<b class="enc">Re-encode ${where}</b> to fit the target size. Clear the target for lossless or smart cuts.`;
+    } else if (!p.reencode && S.trimMode === 'keyframe') {
       $('sumMode').innerHTML = '<b class="copy">Lossless copy</b> — instant, no quality loss. Cuts snap to the nearest keyframe.';
     } else if (!p.reencode && FF.canSmartCut(S.info)) {
       $('sumMode').innerHTML = '<b class="copy">Smart cut</b> — frame-exact. Only the frames between each cut and the next keyframe are re-encoded; everything else is copied losslessly.';
@@ -498,6 +502,7 @@
   $('encoder').addEventListener('change', () => refresh());
   for (const id of ['fmt', 'quality', 'merge']) $(id).addEventListener('change', savePrefs);
   for (const id of ['fmt', 'quality']) $(id).addEventListener('change', updateExportState);
+  $('targetMB').addEventListener('input', () => refresh());
 
   // ---------------- loading a file ----------------
   async function openFile(file) {
@@ -772,16 +777,31 @@
   }, { passive: false });
 
   // ---------------- export ----------------
+  function targetMB() { return Math.max(0, Number($('targetMB').value) || 0); }
   function updateExportState() {
     $('exportBtn').disabled = !S.info || S.exporting;
     $('merge').closest('label').style.display = S.segs.length > 1 ? '' : 'none';
     if (!S.info) return;
     // Same mode choice as the export in main.js.
+    const targetBytes = targetMB() * 1048576;
+    const seconds = S.segs.filter((s) => s.end - s.start > 0.05).reduce((a, s) => a + (s.end - s.start), 0);
+    $('quality').disabled = targetBytes > 0;
+    if (targetBytes > 0) {
+      const r = FF.targetRates(S.info, S.edit, targetBytes, seconds);
+      const aim = fmtBytes(((r.v + r.a) * seconds / 8) * 1.01);
+      const p = plan();
+      // Below ~0.02 bits per pixel the picture falls apart and GPU encoders can't shrink further.
+      const lowBpp = r.v / (p.outW * p.outH * (S.info.fps || 30)) < 0.02;
+      $('sumBytes').textContent = (r.floor ? `Target too small for this length; will come out around ${aim}`
+        : r.capped ? `Source quality is reached below the target; expect ~${aim}`
+        : `Aiming for ~${aim} (usually within ~10%)`)
+        + (lowBpp && !r.capped ? '. Very low bitrate for this resolution: lower Output size for a cleaner result (GPU encoders may overshoot)' : '');
+      return;
+    }
     const reencode = plan().reencode || (S.trimMode === 'precise' && !FF.canSmartCut(S.info));
     const fmt = $('fmt').value;
     const bytes = FF.estimateBytes(S.info, S.edit, {
-      seconds: S.segs.filter((s) => s.end - s.start > 0.05).reduce((a, s) => a + (s.end - s.start), 0),
-      reencode, codec: $('codec').value, quality: $('quality').value,
+      seconds, reencode, codec: $('codec').value, quality: $('quality').value,
       ext: fmt === 'same' ? (/\.[^.]+$/.exec(S.info.name) || ['.mp4'])[0] : `.${fmt}`,
     });
     $('sumBytes').textContent = reencode
@@ -813,6 +833,7 @@
       merge: $('merge').checked,
       encoder: currentEncoder() || 'libx264',
       quality: $('quality').value,
+      targetBytes: targetMB() * 1048576,
       ext: $('fmt').value,
       outDir: S.outDir,
       trimMode: S.trimMode,
@@ -822,7 +843,7 @@
     updateExportState();
     $('progress').hidden = false;
     $('progBar').style.width = '0%';
-    $('progText').textContent = p.reencode ? 'Encoding…' : S.trimMode === 'keyframe' ? 'Copying…' : 'Cutting…';
+    $('progText').textContent = p.reencode || job.targetBytes > 0 ? 'Encoding…' : S.trimMode === 'keyframe' ? 'Copying…' : 'Cutting…';
     const t0 = performance.now();
     const res = await window.api.exportVideo(job);
     S.exporting = false;

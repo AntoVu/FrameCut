@@ -67,6 +67,10 @@ With several segments, "Merge segments" joins them into one file; untick it for 
 The panel shows the estimated output size. It's close for lossless/smart cuts and a rough guess for
 re-encodes; the real size is shown when the export finishes.
 
+**Target size (MB)**: type a size to re-encode to roughly that many megabytes (usually within ~10%; it
+never raises quality above the source). Audio is re-encoded to AAC so its size is predictable. Leave it
+empty for the normal modes. Very small targets look rough; lowering the output size helps.
+
 ## Run from source
 
 Requires Node.js and FFmpeg (`ffmpeg.exe` and `ffprobe.exe`) either on your PATH or in an `ffmpeg/`

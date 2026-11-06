@@ -22,8 +22,18 @@ const ENCODERS = {
   ],
 };
 
-// quality: 'high' | 'balanced' | 'small'
-function qualityArgs(encoder, quality) {
+// quality: 'high' | 'balanced' | 'small'. vbr (bits/s, optional): aim for that video bitrate instead of a quality level.
+function qualityArgs(encoder, quality, vbr) {
+  if (vbr) {
+    // AMF measured ~7% over its bitrate in testing, so aim lower; tune here if outputs run big or small.
+    if (encoder.endsWith('_amf')) vbr = Math.round(vbr * 0.92);
+    const rate = ['-b:v', String(vbr), '-maxrate', String(Math.round(vbr * 1.5)), '-bufsize', String(vbr * 2)];
+    if (encoder.endsWith('_nvenc')) return ['-preset', 'p5', '-tune', 'hq', '-rc', 'vbr', ...rate, '-pix_fmt', 'yuv420p'];
+    if (encoder.endsWith('_qsv')) return ['-preset', 'faster', ...rate, '-pix_fmt', 'nv12'];
+    if (encoder.endsWith('_amf')) return ['-quality', 'balanced', '-rc', 'vbr_peak', ...rate, '-pix_fmt', 'nv12'];
+    if (encoder === 'libx265') return ['-preset', 'fast', ...rate, '-pix_fmt', 'yuv420p', '-tag:v', 'hvc1'];
+    return ['-preset', 'veryfast', ...rate, '-pix_fmt', 'yuv420p'];
+  }
   const q = { high: 0, balanced: 1, small: 2 }[quality] ?? 1;
   if (encoder.endsWith('_nvenc')) {
     const cq = [19, 23, 28][q];
@@ -176,22 +186,40 @@ function estimateBytes(info, edit, { seconds, reencode, codec, quality, ext }) {
     const bpp = v / (info.width * info.height * (info.fps || 30));
     v = bpp * p.outW * p.outH * (info.fps || 30) * (QUALITY_SHARE[quality] || 0.6) * (codec === 'hevc' ? 0.7 : 1);
   }
-  const sel = audioSel(info, edit);
-  let a = sel.length > 1 ? 192e3 : 0;
-  if (sel.length === 1) {
-    const t = info.audioTracks[sel[0]];
-    a = audioArgs(t.codec, ext)[1] === 'copy' && t.bitRate ? t.bitRate : 192e3;
-  }
-  return ((v + a) * seconds / 8) * 1.01; // ~1% container overhead
+  return ((v + audioBitrate(info, edit, ext)) * seconds / 8) * 1.01; // ~1% container overhead
 }
 
-// Args for one segment. job = { input, output, start, end, info, edit, encoder, quality }
+// Audio bits/s in the output (copied tracks keep their rate, re-encoded or mixed ones are 192k).
+function audioBitrate(info, edit, ext) {
+  const sel = audioSel(info, edit);
+  if (sel.length > 1) return 192e3;
+  if (!sel.length) return 0;
+  const t = info.audioTracks[sel[0]];
+  return audioArgs(t.codec, ext)[1] === 'copy' && t.bitRate ? t.bitRate : 192e3;
+}
+
+// Bit rates that land `seconds` of output near `bytes`. Audio is re-encoded to AAC so its size is known
+// (a copied PCM/FLAC track could eat the whole budget). Video never goes above the source's own rate.
+// Returns { v, a, floor, capped }: floor = target too small, capped = source already smaller than the target.
+// ponytail: single-pass rate control, usually within ~10% of the target; two-pass would be tighter but slower.
+const MIN_VIDEO = 100e3;
+function targetRates(info, edit, bytes, seconds) {
+  const total = (bytes / 1.01) * 8 / Math.max(0.01, seconds); // ~1% container overhead
+  const a = audioSel(info, edit).length ? Math.round(clamp(total * 0.12, 32e3, 128e3) / 1000) * 1000 : 0;
+  const want = total - a;
+  const cap = info.videoBitRate || Infinity;
+  const v = Math.round(clamp(want, MIN_VIDEO, Math.max(MIN_VIDEO, cap)));
+  return { v, a, floor: want < MIN_VIDEO, capped: want > cap };
+}
+
+// Args for one segment. job = { input, output, start, end, info, edit, encoder, quality, vbr?, abr? }
 function segmentArgs(job) {
   const { input, output, start, end, info, edit } = job;
   const ext = extname(output);
   const dur = Math.max(0.01, end - start);
   const reencode = job.force || needsReencode(info, edit);
   const a = audioOut(info, edit, ext);
+  if (job.vbr && a.map.length) a.codec = ['-c:a', 'aac', '-b:a', String(job.abr)];
   const args = ['-hide_banner', '-y', '-nostats', '-progress', 'pipe:1'];
 
   if (!reencode) {
@@ -206,7 +234,7 @@ function segmentArgs(job) {
     args.push('-map', '0:v:0', ...a.map);
     const { filters } = buildVideoFilters(info, edit);
     if (filters.length) args.push('-vf', filters.join(','));
-    args.push('-c:v', job.encoder, ...qualityArgs(job.encoder, job.quality));
+    args.push('-c:v', job.encoder, ...qualityArgs(job.encoder, job.quality, job.vbr));
     args.push(...a.codec);
   }
   if (/\.(mp4|mov|m4v)$/i.test(ext)) args.push('-movflags', '+faststart');
@@ -215,7 +243,7 @@ function segmentArgs(job) {
 }
 
 // Several segments re-encoded and joined in a single pass (frame-accurate).
-// job = { input, output, segments:[{start,end}], info, edit, encoder, quality }
+// job = { input, output, segments:[{start,end}], info, edit, encoder, quality, vbr?, abr? }
 function mergeEncodeArgs(job) {
   const { input, output, segments, info, edit } = job;
   const ext = extname(output);
@@ -239,8 +267,8 @@ function mergeEncodeArgs(job) {
   parts.push(`${inputs}concat=n=${segments.length}:v=1:a=${hasAudio ? 1 : 0}${hasAudio ? '[v][a]' : '[v]'}`);
   args.push('-filter_complex', parts.join(';'), '-map', '[v]');
   if (hasAudio) args.push('-map', '[a]');
-  args.push('-c:v', job.encoder, ...qualityArgs(job.encoder, job.quality));
-  if (hasAudio) args.push('-c:a', 'aac', '-b:a', '192k');
+  args.push('-c:v', job.encoder, ...qualityArgs(job.encoder, job.quality, job.vbr));
+  if (hasAudio) args.push('-c:a', 'aac', '-b:a', job.vbr ? String(job.abr) : '192k');
   if (/\.(mp4|mov|m4v)$/i.test(ext)) args.push('-movflags', '+faststart');
   args.push(output);
   return args;
@@ -495,6 +523,7 @@ const FF = {
   defaultAudio,
   audioSel,
   estimateBytes,
+  targetRates,
   segmentArgs,
   mergeEncodeArgs,
   canSmartCut,

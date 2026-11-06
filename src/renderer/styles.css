@@ -133,8 +133,8 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
 .nums input { width: 100%; background: none; border: 0; padding: 5px 4px; outline: none; font-variant-numeric: tabular-nums; min-width: 0; }
 .nums label:focus-within { border-color: var(--accent); }
 input::-webkit-inner-spin-button { opacity: 0.4; }
-select { background: var(--bg3); border: 1px solid var(--line2); border-radius: 6px; padding: 5px 8px; outline: none; }
-select:focus { border-color: var(--accent); }
+select, input[type=number] { background: var(--bg3); border: 1px solid var(--line2); border-radius: 6px; padding: 5px 8px; outline: none; }
+select:focus, input[type=number]:focus { border-color: var(--accent); }
 
 .summary { margin-top: 10px; background: var(--bg3); border-radius: var(--radius); padding: 12px; border: 1px solid var(--line); }
 .sumSize { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
@@ -181,3 +181,5 @@ select:focus { border-color: var(--accent); }
 .toast.err { border-color: rgba(239,95,95,0.6); }
 .toast .tmsg { flex: 1; white-space: pre-wrap; word-break: break-word; }
 .toast .tact { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+
+input[type=number] { width: 64px; }
